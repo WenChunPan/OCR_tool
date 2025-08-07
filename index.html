@@ -189,6 +189,9 @@
             document.getElementById('progressText').textContent = '';
         }
 
+
+
+
         async function sendToFlaskAPI(file, filename) {
             const log = document.getElementById('log');
             const formData = new FormData();
@@ -237,6 +240,7 @@
                     return;
                 }
 
+                //  renderJsonUI 函式
                 function renderJsonUI(data, filename) {
                     const section = document.createElement('details');
                     section.open = true;
@@ -244,6 +248,30 @@
                     summary.textContent = `📄 ${filename}`;
                     section.appendChild(summary);
 
+                    const fileBlock = document.createElement('div');
+                    fileBlock.className = 'file-block';
+
+                    const previewPanel = document.createElement('div');
+                    previewPanel.className = 'preview-panel';
+
+                    const tablePanel = document.createElement('div');
+                    tablePanel.className = 'table-panel';
+
+                    // 檔案預覽（透過 filename 判斷副檔名）
+                    const lowerName = filename.toLowerCase();
+                    if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.webp')) {
+                        const img = document.createElement('img');
+                        img.src = URL.createObjectURL(file);
+                        previewPanel.appendChild(img);
+                    } else if (lowerName.endsWith('.pdf')) {
+                        const iframe = document.createElement('iframe');
+                        iframe.src = URL.createObjectURL(file);
+                        previewPanel.appendChild(iframe);
+                    } else {
+                        previewPanel.innerText = '（不支援的預覽格式）';
+                    }
+
+                    // 建立可編輯的 JSON 表格
                     const table = document.createElement('table');
                     table.border = 1;
                     table.style.marginTop = '10px';
@@ -258,10 +286,12 @@
                         table.appendChild(tr);
                     });
 
-                    section.appendChild(table);
+                    tablePanel.appendChild(table);
 
+                    // 下載按鈕
                     const downloadBtn = document.createElement('button');
                     downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
+                    downloadBtn.style.marginTop = '10px';
                     downloadBtn.onclick = () => {
                         const updatedData = JSON.parse(JSON.stringify(data));
                         const allCells = table.querySelectorAll('td');
@@ -281,9 +311,18 @@
                         URL.revokeObjectURL(url);
                     };
 
-                    section.appendChild(downloadBtn);
+                    tablePanel.appendChild(downloadBtn);
+
+                    // 組合左右面板
+                    fileBlock.appendChild(previewPanel);
+                    fileBlock.appendChild(tablePanel);
+                    section.appendChild(fileBlock);
+
                     document.getElementById('tableContainer').appendChild(section);
+                    log.textContent += `\n✅ 顯示 ${filename} JSON 編輯完成。`;
                 }
+
+
 
                 const data = await response.json();
                 // 取得excel辨識結果
@@ -291,10 +330,12 @@
                 // 取得json辨識結果
                 const jsonData = data.ocr_json
                 const filename = file.name || 'result';
+                // 接收後端傳來的excel是否有值（true:有）
+                const hasExcelData = data.has_excel_data;  // 這一行是關鍵
 
 
                 // 開始辨識表格or非表格
-                if (base64Data) {
+                if (hasExcelData) {
                     //把Excel base64編碼轉成二進位檔案，讓使用者可以下載成 Excel
                     const binary = atob(base64Data);
                     const bytes = new Uint8Array(binary.length);
@@ -447,56 +488,8 @@
                 }
                 // 非表格（excel辨識結果為空的時候） 「沒有辨識出 Excel 表格內容」
                 else {
-                    const data = jsonData.text;  // [{ text, box, score }]
-                    const section = document.createElement('details');
-                    section.open = true;
-                    const summary = document.createElement('summary');
-                    summary.textContent = `📄 ${filename}`;
-                    section.appendChild(summary);
 
-                    const table = document.createElement('table');
-                    table.border = 1;
-                    table.style.marginTop = '10px';
-
-                    // 顯示每一列的 text 可編輯
-                    data.forEach((item, index) => {
-                        const tr = document.createElement('tr');
-                        const td = document.createElement('td');
-                        td.contentEditable = true;
-                        td.textContent = item.text || ''; // 只顯示 text 欄位
-                        td.dataset.index = index;
-                        tr.appendChild(td);
-                        table.appendChild(tr);
-                    });
-
-                    section.appendChild(table);
-
-                    // 下載 JSON 按鈕
-                    const downloadBtn = document.createElement('button');
-                    downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
-                    downloadBtn.style.marginTop = '10px';
-                    downloadBtn.onclick = () => {
-                        const updatedData = JSON.parse(JSON.stringify(data));  // 深拷貝
-                        const allCells = table.querySelectorAll('td');
-                        allCells.forEach(td => {
-                            const i = td.dataset.index;
-                            if (updatedData[i]) {
-                                updatedData[i].text = td.textContent;  // 替換 text 欄位
-                            }
-                        });
-
-                        const blob = new Blob([JSON.stringify(updatedData, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename.replace(/\.[^.]+$/, '') + '_edited.json';
-                        a.click();
-                        URL.revokeObjectURL(url);
-                    };
-
-                    section.appendChild(downloadBtn);
-                    document.getElementById('tableContainer').appendChild(section);
-                    log.textContent += `\n✅ 顯示 ${filename} JSON 編輯完成。`;
+                    renderJsonUI(jsonData.text, filename);
 
                 }
 

@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
 import requests
 from flask_cors import CORS
+import base64
+from openpyxl import load_workbook
+from io import BytesIO
 
 # 初始化Flask
 app = Flask(__name__)
@@ -10,7 +13,8 @@ CORS(app)
 
 # ocr api的url
 ocr_api_url = (
-    "http://192.168.0.160:30020/ai/service/v2/recognize/table/multipage?excel=1"
+    # "http://192.168.0.160:30020/ai/service/v2/recognize/table/multipage?excel=1"
+    "http://leda-textin.seadeep.ai/ai/service/v2/recognize/table/multipage?excel=1"
 )
 
 
@@ -53,12 +57,23 @@ def ocr_proxy():
         return jsonify(
             {"error": "Failed to parse OCR API response", "detail": str(e)}
         ), 500
+
+    # 檢查 Excel 是否為空（A1有無值）
+    try:
+        excel_bytes = base64.b64decode(excel_base64)
+        workbook = load_workbook(filname=BytesIO(excel_bytes), data_only=True)
+        a1_value = workbook.active["A1"].value
+        is_excel_empty = not bool(a1_value)
+    except Exception as e:
+        return jsonify({"error": "Failed to process Excel file", "detail": str(e)}), 500
+
     # 回傳給前端
     return jsonify(
         {
             "filename": file.filename,
             "excel_base64": excel_base64,
             "ocr_json": json_result,
+            "has_excel_data": not is_excel_empty,  # 回傳 true 或 false 給前端
         }
     )
 
