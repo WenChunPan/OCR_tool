@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>OCR 測試工具</title>
+</head>
+
+<body>
+    <h1>🔍 OCR 測試工具</h1>
+    <input type="file" id="fileInput" accept="image/*,application/pdf">
+    <button onclick="uploadFile()">上傳並檢視辨識結果</button>
+    <pre id="output" style="white-space: pre-wrap; margin-top: 20px; background: #f0f0f0; padding: 10px;"></pre>
+
+    <script>
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const output = document.getElementById('output');
+            output.textContent = '⏳ 上傳中...';
+
+            const file = fileInput.files[0];
+            if (!file) {
+                output.textContent = '⚠️ 請選擇圖片或 PDF 檔案';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('http://localhost:5000/ocr', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                output.textContent = JSON.stringify(result, null, 2); // 直接顯示伺服器回傳的 json 格式
+            } catch (err) {
+                output.textContent = '💥 發生錯誤：' + err.message;
+            }
+        }
+    </script>
+</body>
+
+</html>

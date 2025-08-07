@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR 多檔案辨識工具 | LEDA Technology</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .loader {
+            width: 80px;
+            height: 80px;
+            border: 8px solid transparent;
+            border-top: 8px solid #00eaff;
+            border-radius: 50%;
+            animation: loader-spin 1s linear infinite;
+            box-shadow: 0 0 10px #00eaff, 0 0 20px #00eaff;
+        }
+
+        .loader-wrapper {
+            position: relative;
+            width: 80px;
+            height: 80px;
+        }
+
+        .loader-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            color: #00eaff;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        @keyframes loader-spin {
+            0% {
+                transform: rotate(0deg);
+                filter: hue-rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+                filter: hue-rotate(360deg);
+            }
+        }
+
+        #tableContainer {
+            padding: 10px;
+        }
+
+        #log:empty {
+            display: none !important;
+        }
+
+        .file-block {
+            display: flex;
+            gap: 16px;
+            height: 85vh;
+            /* 避免撐超過視窗，保留上方控制區 */
+            margin-bottom: 20px;
+        }
+
+        .preview-panel {
+            flex: 1;
+            max-height: 1000px;
+            overflow: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+
+        .table-panel {
+            flex: 1;
+            max-height: 1000px;
+            overflow: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #fff;
+        }
+
+        img,
+        iframe {
+            max-height: 1000px;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border: none;
+        }
+
+        .file-block img,
+        .file-block iframe {
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+
+
+
+</head>
+
+<body class="bg-gray-50 min-h-screen text-gray-800">
+    <!-- Header -->
+    <header class="flex items-center justify-between p-4 bg-yellow-300 shadow">
+        <div class="flex items-center space-x-4">
+            <img src="img/leda.jpg" alt="LEDA Logo" class="h-12">
+            <h1 class="text-2xl font-bold text-gray-800 whitespace-nowrap">OCR 多檔案辨識工具</h1>
+        </div>
+        <p class="text-sm text-gray-700 pr-4">Powered by LEDA Technology</p>
+    </header>
+    <!-- File Upload Area -->
+    <main class="max-w-7xl mx-auto px-6 py-8">
+        <div class="mb-6">
+            <input type="file" id="fileInput" multiple accept=".pdf,image/*"
+                class="block w-full text-sm text-gray-600 border border-gray-300 rounded p-2">
+            <button onclick="handleFiles()"
+                class="mt-2 px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-white font-semibold rounded shadow">開始辨識</button>
+            <p class="text-xs text-gray-500 mt-1">支援上傳格式：PDF 及圖片檔案</p>
+        </div>
+
+        <!-- 示意區塊 -->
+        <div id="placeholderLayout" class="flex flex-col md:flex-row gap-4 mt-10">
+            <div
+                class="flex-1 border border-dashed border-gray-300 p-6 flex flex-col items-center justify-center min-h-[300px]">
+                <h2 class="text-lg font-semibold text-gray-700 mb-2">🔗 原檔案</h2>
+                <p class="text-sm text-gray-500">待上傳的影像或 PDF 文件</p>
+            </div>
+            <div
+                class="flex-1 border border-dashed border-gray-300 p-6 flex flex-col items-center justify-center min-h-[300px]">
+                <h2 class="text-lg font-semibold text-gray-700 mb-2">📄 辨識結果</h2>
+                <p class="text-sm text-gray-500">支援瀏覽器內即時編輯</p>
+            </div>
+        </div>
+
+        <!-- 處理紀錄區 -->
+        <div id="log" class="mt-6 text-sm whitespace-pre-wrap bg-white p-4 border border-gray-200 rounded shadow"></div>
+
+        <!-- 表格顯示區 -->
+        <div id="tableContainer" class="mt-4"></div>
+
+        <!-- 載入中動畫 -->
+        <div id="loadingSpinner"
+            class="fixed top-0 left-0 w-full h-full bg-white bg-opacity-60 flex items-center justify-center z-50 hidden">
+            <div class="loader-wrapper">
+                <div class="loader"></div>
+                <div id="progressText" class="loader-text"></div>
+            </div>
+        </div>
+    </main>
+    <script>
+        async function handleFiles() {
+            const input = document.getElementById('fileInput');
+            const files = Array.from(input.files);
+            const log = document.getElementById('log');
+
+            log.textContent = '';
+            document.getElementById('placeholderLayout').style.display = 'none';
+            document.getElementById('tableContainer').innerHTML = '';
+
+            if (!files.length) {
+                log.textContent = '⚠️ 請先選擇檔案。';
+                return;
+            }
+
+
+
+            // 顯示載入動畫
+            document.getElementById('loadingSpinner').classList.remove('hidden');
+            document.getElementById('placeholderLayout').style.display = 'none';
+            document.getElementById('tableContainer').innerHTML = '';
+            log.textContent = '';
+
+            for (let i = 0; i < files.length; i++) {
+                document.getElementById('progressText').textContent = `${i + 1} / ${files.length}`;
+                await sendToFlaskAPI(files[i], files[i].name);
+            }
+            document.getElementById('loadingSpinner').classList.add('hidden');
+            document.getElementById('progressText').textContent = '';
+        }
+
+        async function sendToFlaskAPI(file, filename) {
+            const log = document.getElementById('log');
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('http://localhost:5000/ocr', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                //if (!response.ok) {
+                //     const errorText = await response.text();
+                //     log.textContent += `\n❌ 錯誤：${response.status} - ${errorText}`;
+                //     return;
+                // }
+
+                if (!response.ok) {
+                    let errorTitle = "辨識失敗";
+                    let errorMessage = "伺服器回應錯誤，請稍後再試。";
+
+                    try {
+                        const errorData = await response.json();
+                        if (errorData.error?.includes("parse OCR API response")) {
+                            errorTitle = "不支援的檔案格式";
+                            errorMessage = "請上傳 PDF 或圖片檔案（如 .jpg、.png）。";
+                        } else if (errorData.error) {
+                            errorMessage = errorData.error;
+                            if (errorData.detail) {
+                                errorMessage += `\n詳細資訊：${errorData.detail}`;
+                            }
+                        }
+                    } catch (jsonError) {
+                        // 若 response 不是 JSON（如 500 錯誤頁面），就用純文字顯示
+                        const fallbackText = await response.text();
+                        errorMessage = `狀態碼：${response.status}\n${fallbackText}`;
+                    }
+
+                    Swal.fire({
+                        icon: 'error',
+                        title: errorTitle,
+                        text: errorMessage,
+                        confirmButtonText: '確定'
+                    });
+
+                    return;
+                }
+
+                function renderJsonUI(data, filename) {
+                    const section = document.createElement('details');
+                    section.open = true;
+                    const summary = document.createElement('summary');
+                    summary.textContent = `📄 ${filename}`;
+                    section.appendChild(summary);
+
+                    const table = document.createElement('table');
+                    table.border = 1;
+                    table.style.marginTop = '10px';
+
+                    data.forEach((item, index) => {
+                        const tr = document.createElement('tr');
+                        const td = document.createElement('td');
+                        td.contentEditable = true;
+                        td.textContent = item.text || '';
+                        td.dataset.index = index;
+                        tr.appendChild(td);
+                        table.appendChild(tr);
+                    });
+
+                    section.appendChild(table);
+
+                    const downloadBtn = document.createElement('button');
+                    downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
+                    downloadBtn.onclick = () => {
+                        const updatedData = JSON.parse(JSON.stringify(data));
+                        const allCells = table.querySelectorAll('td');
+                        allCells.forEach(td => {
+                            const i = td.dataset.index;
+                            if (updatedData[i]) {
+                                updatedData[i].text = td.textContent;
+                            }
+                        });
+
+                        const blob = new Blob([JSON.stringify(updatedData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename.replace(/\.[^.]+$/, '') + '_edited.json';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    };
+
+                    section.appendChild(downloadBtn);
+                    document.getElementById('tableContainer').appendChild(section);
+                }
+
+                const data = await response.json();
+                // 取得excel辨識結果
+                const base64Data = data.excel_base64;
+                // 取得json辨識結果
+                const jsonData = data.ocr_json
+                const filename = file.name || 'result';
+
+
+                // 開始辨識表格or非表格
+                if (base64Data) {
+                    //把Excel base64編碼轉成二進位檔案，讓使用者可以下載成 Excel
+                    const binary = atob(base64Data);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        bytes[i] = binary.charCodeAt(i);
+                    }
+                    const blob = new Blob([bytes], {
+                        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    });
+
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        const arrayData = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(arrayData, { type: 'array' });
+                        const sheetNames = workbook.SheetNames;
+                        const originalWorksheets = { ...workbook.Sheets };
+
+                        const section = document.createElement('details');
+                        section.open = true;
+                        const summary = document.createElement('summary');
+                        summary.textContent = `📄 ${filename}`;
+                        section.appendChild(summary);
+
+                        const fileBlock = document.createElement('div');
+                        fileBlock.className = 'file-block';
+
+                        const previewPanel = document.createElement('div');
+                        previewPanel.className = 'preview-panel';
+                        const tablePanel = document.createElement('div');
+                        tablePanel.className = 'table-panel';
+
+                        if (file.type.startsWith('image/')) {
+                            const img = document.createElement('img');
+                            img.src = URL.createObjectURL(file);
+                            img.className = 'max-w-full max-h-[400px] object-contain';
+                            previewPanel.appendChild(img);
+                        } else if (file.type === 'application/pdf') {
+                            const iframe = document.createElement('iframe');
+                            iframe.src = URL.createObjectURL(file);
+                            iframe.className = 'w-full h-[400px]';
+                            previewPanel.appendChild(iframe);
+                        } else {
+                            previewPanel.innerText = '（不支援的預覽格式）';
+                        }
+
+
+
+                        const tableDivs = [];
+                        const titles = [];
+
+
+                        sheetNames.forEach((sheetName, i) => {
+                            const worksheet = workbook.Sheets[sheetName];
+                            const tableHTML = XLSX.utils.sheet_to_html(worksheet, { editable: true });
+
+                            const tableTitle = document.createElement('h4');
+                            tableTitle.textContent = `📑 ${sheetName}`;
+                            titles.push(tableTitle);
+
+                            const tableDiv = document.createElement('div');
+                            tableDiv.innerHTML = tableHTML;
+                            tableDivs.push(tableDiv);
+                        });
+
+                        let currentPage = 0;
+
+                        const navDiv = document.createElement('div');
+                        navDiv.style.marginTop = '10px';
+                        const prevBtn = document.createElement('button');
+                        const nextBtn = document.createElement('button');
+                        prevBtn.textContent = '⬅️ 上一頁';
+                        nextBtn.textContent = '➡️ 下一頁';
+                        prevBtn.disabled = true;
+                        nextBtn.disabled = sheetNames.length <= 1;
+
+                        prevBtn.onclick = () => {
+                            if (currentPage > 0) {
+                                currentPage--;
+                                renderPage(currentPage);
+                            }
+                        };
+                        nextBtn.onclick = () => {
+                            if (currentPage < sheetNames.length - 1) {
+                                currentPage++;
+                                renderPage(currentPage);
+                            }
+                        };
+
+                        navDiv.appendChild(prevBtn);
+                        navDiv.appendChild(nextBtn);
+
+                        const downloadXLSXBtn = document.createElement('button');
+                        downloadXLSXBtn.textContent = '⬇️ 下載 Excel (保留多 Sheet)';
+                        downloadXLSXBtn.onclick = () => {
+                            sheetNames.forEach((name, i) => {
+                                const tbl = tableDivs[i].querySelector('table');
+                                const updatedSheet = XLSX.utils.table_to_sheet(tbl);
+                                originalWorksheets[name] = updatedSheet;
+                            });
+                            const newWB = XLSX.utils.book_new();
+                            sheetNames.forEach(name => {
+                                XLSX.utils.book_append_sheet(newWB, originalWorksheets[name], name);
+                            });
+                            XLSX.writeFile(newWB, filename.replace(/\.[^.]+$/, '') + '.xlsx');
+                        };
+
+                        const downloadJSONBtn = document.createElement('button');
+                        downloadJSONBtn.textContent = '⬇️ 下載 JSON';
+                        downloadJSONBtn.onclick = () => {
+                            sheetNames.forEach((name, i) => {
+                                const tbl = tableDivs[i].querySelector('table');
+                                const updatedSheet = XLSX.utils.table_to_sheet(tbl);
+                                originalWorksheets[name] = updatedSheet;
+                            });
+                            const result = {};
+                            sheetNames.forEach(name => {
+                                const sheetData = XLSX.utils.sheet_to_json(originalWorksheets[name], { header: 1 });
+                                result[name] = sheetData;
+                            });
+                            const jsonStr = JSON.stringify(result, null, 2);
+                            const blob = new Blob([jsonStr], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = filename.replace(/\.[^.]+$/, '') + '.json';
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        };
+
+                        function renderPage(index) {
+                            tablePanel.innerHTML = '';
+                            tablePanel.appendChild(titles[index]);
+                            tablePanel.appendChild(tableDivs[index]);
+                            tablePanel.appendChild(navDiv);
+                            tablePanel.appendChild(downloadXLSXBtn);
+                            tablePanel.appendChild(downloadJSONBtn);
+                            prevBtn.disabled = index === 0;
+                            nextBtn.disabled = index === sheetNames.length - 1;
+                        }
+
+                        renderPage(currentPage);
+
+                        fileBlock.appendChild(previewPanel);
+                        fileBlock.appendChild(tablePanel);
+                        section.appendChild(fileBlock);
+                        document.getElementById('tableContainer').appendChild(section);
+                        log.textContent += `\n✅ 顯示 ${filename} 表格完成。`;
+                    };
+                    reader.readAsArrayBuffer(blob);
+                }
+                // 非表格（excel辨識結果為空的時候） 「沒有辨識出 Excel 表格內容」
+                else {
+                    const data = jsonData.text;  // [{ text, box, score }]
+                    const section = document.createElement('details');
+                    section.open = true;
+                    const summary = document.createElement('summary');
+                    summary.textContent = `📄 ${filename}`;
+                    section.appendChild(summary);
+
+                    const table = document.createElement('table');
+                    table.border = 1;
+                    table.style.marginTop = '10px';
+
+                    // 顯示每一列的 text 可編輯
+                    data.forEach((item, index) => {
+                        const tr = document.createElement('tr');
+                        const td = document.createElement('td');
+                        td.contentEditable = true;
+                        td.textContent = item.text || ''; // 只顯示 text 欄位
+                        td.dataset.index = index;
+                        tr.appendChild(td);
+                        table.appendChild(tr);
+                    });
+
+                    section.appendChild(table);
+
+                    // 下載 JSON 按鈕
+                    const downloadBtn = document.createElement('button');
+                    downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
+                    downloadBtn.style.marginTop = '10px';
+                    downloadBtn.onclick = () => {
+                        const updatedData = JSON.parse(JSON.stringify(data));  // 深拷貝
+                        const allCells = table.querySelectorAll('td');
+                        allCells.forEach(td => {
+                            const i = td.dataset.index;
+                            if (updatedData[i]) {
+                                updatedData[i].text = td.textContent;  // 替換 text 欄位
+                            }
+                        });
+
+                        const blob = new Blob([JSON.stringify(updatedData, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename.replace(/\.[^.]+$/, '') + '_edited.json';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    };
+
+                    section.appendChild(downloadBtn);
+                    document.getElementById('tableContainer').appendChild(section);
+                    log.textContent += `\n✅ 顯示 ${filename} JSON 編輯完成。`;
+
+                }
+
+
+            } catch (e) {
+                log.textContent += `\n💥 發生錯誤：${e.message}`;
+            }
+        }
+    </script>
+</body>
+
+</html>
