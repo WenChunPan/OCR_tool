@@ -445,22 +445,69 @@
                             previewPanel.innerText = '（不支援的預覽格式）';
                         }
 
-                        // 右邊編輯 JSON 區（預設顯示整個 JSON）
-                        const textarea = document.createElement('textarea');
-                        textarea.value = JSON.stringify(jsonData, null, 2);
-                        textarea.style.width = '100%';
-                        textarea.style.height = '400px';
-                        textarea.style.whiteSpace = 'pre';
-                        jsonEditPanel.appendChild(textarea);
+                        // ✅ 儲存原始 JSON 結構
+                        const originalJson = JSON.parse(JSON.stringify(jsonData));
 
-                        // 右邊下載按鈕
+                        // ✅ 提取所有 text 欄位，含其路徑
+                        const textList = [];
+
+                        function extractTextPaths(obj, path = []) {
+                            if (typeof obj !== "object" || obj === null) return;
+
+                            for (const key in obj) {
+                                if (key === "text" && typeof obj[key] === "string") {
+                                    textList.push({ path: [...path, key], value: obj[key] });
+                                } else {
+                                    extractTextPaths(obj[key], [...path, key]);
+                                }
+                            }
+                        }
+
+                        extractTextPaths(originalJson);
+
+                        // ✅ 顯示 text 欄位編輯區
+                        const form = document.createElement('div');
+                        form.style.maxHeight = '400px';
+                        form.style.overflowY = 'auto';
+
+                        textList.forEach((item, index) => {
+                            const label = document.createElement('label');
+                            label.textContent = `文字區塊 ${index + 1}`;
+                            label.style.fontWeight = "bold";
+
+                            const input = document.createElement('input');
+                            input.type = 'text';
+                            input.value = item.value;
+                            input.dataset.path = JSON.stringify(item.path);
+                            input.className = "block border rounded w-full my-2 p-1 text-sm";
+
+                            form.appendChild(label);
+                            form.appendChild(input);
+                        });
+
+                        jsonEditPanel.appendChild(form);
+
+                        // ✅ 建立下載按鈕（含編輯後的內容）
                         const downloadBtn = document.createElement('button');
                         downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
                         downloadBtn.style.marginTop = '10px';
                         downloadBtn.onclick = () => {
                             try {
-                                const updatedJson = JSON.parse(textarea.value);
-                                const blob = new Blob([JSON.stringify(updatedJson, null, 2)], { type: 'application/json' });
+                                const inputs = form.querySelectorAll('input');
+
+                                inputs.forEach(input => {
+                                    const path = JSON.parse(input.dataset.path);
+                                    const newValue = input.value;
+
+                                    // 根據 path 回寫值
+                                    let current = originalJson;
+                                    for (let i = 0; i < path.length - 1; i++) {
+                                        current = current[path[i]];
+                                    }
+                                    current[path[path.length - 1]] = newValue;
+                                });
+
+                                const blob = new Blob([JSON.stringify(originalJson, null, 2)], { type: 'application/json' });
                                 const url = URL.createObjectURL(blob);
                                 const a = document.createElement('a');
                                 a.href = url;
@@ -468,17 +515,18 @@
                                 a.click();
                                 URL.revokeObjectURL(url);
                             } catch (e) {
-                                alert('❌ JSON 格式錯誤，無法下載。請檢查編輯內容。');
+                                alert('❌ JSON 格式錯誤，無法下載。請檢查輸入內容。');
                             }
                         };
+
                         jsonEditPanel.appendChild(downloadBtn);
 
-                        // 組裝畫面
+                        // ✅ 組裝畫面
                         fileBlock.appendChild(previewPanel);
                         fileBlock.appendChild(jsonEditPanel);
                         section.appendChild(fileBlock);
                         document.getElementById('tableContainer').appendChild(section);
-                        log.textContent += `\n✅ 顯示 ${filename} 非表格 JSON 編輯完成。`;
+                        log.textContent += `\n✅ 顯示 ${filename} 非表格 JSON 編輯完成（精簡版）。`;
 
                     }
                 }
