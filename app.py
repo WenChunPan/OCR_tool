@@ -1,9 +1,20 @@
-from flask import Flask, request, jsonify
-import requests
+from flask import Flask, request, jsonify, send_file
+import requests, os, sys
 from flask_cors import CORS
 import base64
 from openpyxl import load_workbook
 from io import BytesIO
+import logging
+
+# 設定 logging
+logging.basicConfig(
+    level=logging.INFO,  # 設定最低輸出等級為 INFO
+    format="%(asctime)s - %(levelname)s - %(message)s",  # log 顯示格式
+    handlers=[logging.StreamHandler()],  # 輸出到標準輸出（例如 terminal）
+)
+
+logger = logging.getLogger(__name__)  # 建立 logger
+
 
 # 初始化Flask
 app = Flask(__name__)
@@ -13,12 +24,33 @@ CORS(app)
 
 # ocr api的url
 ocr_api_url = (
-    # "http://192.168.0.160:30020/ai/service/v2/recognize/table/multipage?excel=1"
-    "http://leda-textin.seadeep.ai/ai/service/v2/recognize/table/multipage?excel=1"
+    "http://192.168.0.160:30020/ai/service/v2/recognize/table/multipage?excel=1"
+    # "http://leda-textin.seadeep.ai/ai/service/v2/recognize/table/multipage?excel=1"
 )
 
 
 # call ocr api
+folder = "static"
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def catch_all(path):
+    if path == "":
+        path = "index.html"
+
+    filename = os.path.join(folder, path)
+    if not os.path.exists(filename):
+        filename = os.path.join(folder, "index.html")
+
+    mimetype = None
+    _, ext = os.path.splitext(filename)  # aaa.js
+    if ext == ".js" or ext == ".mjs":
+        mimetype = "application/javascript"
+
+    return send_file(filename, mimetype=mimetype)
+
+
 @app.route("/ocr", methods=["POST"])
 def ocr_proxy():
     # 如果沒有上傳檔案
@@ -61,13 +93,27 @@ def ocr_proxy():
     # 檢查 Excel 是否為空（A1有無值）
     try:
         excel_bytes = base64.b64decode(excel_base64)
-        workbook = load_workbook(filname=BytesIO(excel_bytes), data_only=True)
-        a1_value = workbook.active["A1"].value
-        is_excel_empty = not bool(a1_value)
+        logger.info("✅ Excel base64 轉換成功，準備載入")
+        workbook = load_workbook(filename=BytesIO(excel_bytes), data_only=True)
+        sheet = workbook.active
+
+        # 遍歷所有儲存格，只要有一格不是 None，就視為有資料
+        any_data_found = any(
+            isinstance(cell.value, (int, float))
+            or (isinstance(cell.value, str) and cell.value.strip() != "")
+            for row in sheet.iter_rows()
+            for cell in row
+        )
+        is_excel_empty = not any_data_found
+        # is_excel_empty = not has_data
     except Exception as e:
+        logger.error(f"❌ Excel 解碼或載入失敗：{str(e)}")
         return jsonify({"error": "Failed to process Excel file", "detail": str(e)}), 500
 
     # 回傳給前端
+    logger.info("has_excel_data: %s", not is_excel_empty)  # ✅ 看這行有沒有印 true
+    sys.stdout.flush()
+
     return jsonify(
         {
             "filename": file.filename,
@@ -80,4 +126,4 @@ def ocr_proxy():
 
 # 啟動Flask
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(host="0.0.0.0", port=5001, debug=True)

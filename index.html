@@ -198,7 +198,7 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch('http://localhost:5000/ocr', {
+                const response = await fetch('/ocr', {
                     method: 'POST',
                     body: formData
                 });
@@ -240,88 +240,18 @@
                     return;
                 }
 
-                //  renderJsonUI 函式
-                function renderJsonUI(data, filename) {
-                    const section = document.createElement('details');
-                    section.open = true;
-                    const summary = document.createElement('summary');
-                    summary.textContent = `📄 ${filename}`;
-                    section.appendChild(summary);
-
-                    const fileBlock = document.createElement('div');
-                    fileBlock.className = 'file-block';
-
-                    const previewPanel = document.createElement('div');
-                    previewPanel.className = 'preview-panel';
-
-                    const tablePanel = document.createElement('div');
-                    tablePanel.className = 'table-panel';
-
-                    // 檔案預覽（透過 filename 判斷副檔名）
-                    const lowerName = filename.toLowerCase();
-                    if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.webp')) {
-                        const img = document.createElement('img');
-                        img.src = URL.createObjectURL(file);
-                        previewPanel.appendChild(img);
-                    } else if (lowerName.endsWith('.pdf')) {
-                        const iframe = document.createElement('iframe');
-                        iframe.src = URL.createObjectURL(file);
-                        previewPanel.appendChild(iframe);
-                    } else {
-                        previewPanel.innerText = '（不支援的預覽格式）';
-                    }
-
-                    // 建立可編輯的 JSON 表格
-                    const table = document.createElement('table');
-                    table.border = 1;
-                    table.style.marginTop = '10px';
-
-                    data.forEach((item, index) => {
-                        const tr = document.createElement('tr');
-                        const td = document.createElement('td');
-                        td.contentEditable = true;
-                        td.textContent = item.text || '';
-                        td.dataset.index = index;
-                        tr.appendChild(td);
-                        table.appendChild(tr);
+                // 交給前端來判斷是否有資料
+                function hasSheetData(workbook) {
+                    return workbook.SheetNames.some(sheetName => {
+                        const worksheet = workbook.Sheets[sheetName];
+                        const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                        return sheetData.some(row =>
+                            row.some(cell =>
+                                typeof cell === 'number' || (typeof cell === 'string' && cell.trim() !== '')
+                            )
+                        );
                     });
-
-                    tablePanel.appendChild(table);
-
-                    // 下載按鈕
-                    const downloadBtn = document.createElement('button');
-                    downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
-                    downloadBtn.style.marginTop = '10px';
-                    downloadBtn.onclick = () => {
-                        const updatedData = JSON.parse(JSON.stringify(data));
-                        const allCells = table.querySelectorAll('td');
-                        allCells.forEach(td => {
-                            const i = td.dataset.index;
-                            if (updatedData[i]) {
-                                updatedData[i].text = td.textContent;
-                            }
-                        });
-
-                        const blob = new Blob([JSON.stringify(updatedData, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename.replace(/\.[^.]+$/, '') + '_edited.json';
-                        a.click();
-                        URL.revokeObjectURL(url);
-                    };
-
-                    tablePanel.appendChild(downloadBtn);
-
-                    // 組合左右面板
-                    fileBlock.appendChild(previewPanel);
-                    fileBlock.appendChild(tablePanel);
-                    section.appendChild(fileBlock);
-
-                    document.getElementById('tableContainer').appendChild(section);
-                    log.textContent += `\n✅ 顯示 ${filename} JSON 編輯完成。`;
                 }
-
 
 
                 const data = await response.json();
@@ -330,26 +260,28 @@
                 // 取得json辨識結果
                 const jsonData = data.ocr_json
                 const filename = file.name || 'result';
-                // 接收後端傳來的excel是否有值（true:有）
-                const hasExcelData = data.has_excel_data;  // 這一行是關鍵
 
+                //把Excel base64編碼轉成二進位檔案，讓使用者可以下載成 Excel
+                const binary = atob(base64Data);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                const blob = new Blob([bytes], {
+                    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                });
 
-                // 開始辨識表格or非表格
-                if (hasExcelData) {
-                    //把Excel base64編碼轉成二進位檔案，讓使用者可以下載成 Excel
-                    const binary = atob(base64Data);
-                    const bytes = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i++) {
-                        bytes[i] = binary.charCodeAt(i);
-                    }
-                    const blob = new Blob([bytes], {
-                        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                    });
+                // 讀取 blob → 判斷 workbook 是否有資料
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const arrayData = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(arrayData, { type: 'array' });
+                    // 接收後端傳來的excel是否有值（true:有）
+                    const hasExcelData = hasSheetData(workbook);
+                    console.log("🧪 前端實際判斷 hasExcelData:", hasExcelData);
 
-                    const reader = new FileReader();
-                    reader.onload = function (e) {
-                        const arrayData = new Uint8Array(e.target.result);
-                        const workbook = XLSX.read(arrayData, { type: 'array' });
+                    // 開始辨識表格or非表格
+                    if (hasExcelData) {
                         const sheetNames = workbook.SheetNames;
                         const originalWorksheets = { ...workbook.Sheets };
 
@@ -381,11 +313,8 @@
                             previewPanel.innerText = '（不支援的預覽格式）';
                         }
 
-
-
                         const tableDivs = [];
                         const titles = [];
-
 
                         sheetNames.forEach((sheetName, i) => {
                             const worksheet = workbook.Sheets[sheetName];
@@ -483,20 +412,82 @@
                         section.appendChild(fileBlock);
                         document.getElementById('tableContainer').appendChild(section);
                         log.textContent += `\n✅ 顯示 ${filename} 表格完成。`;
-                    };
-                    reader.readAsArrayBuffer(blob);
+                    }
+                    // 非表格（excel辨識結果為空的時候） 「沒有辨識出 Excel 表格內容」
+                    else {
+                        const section = document.createElement('details');
+                        section.open = true;
+                        const summary = document.createElement('summary');
+                        summary.textContent = `📄 ${filename}`;
+                        section.appendChild(summary);
+
+                        const fileBlock = document.createElement('div');
+                        fileBlock.className = 'file-block';
+
+                        const previewPanel = document.createElement('div');
+                        previewPanel.className = 'preview-panel';
+                        const jsonEditPanel = document.createElement('div');
+                        jsonEditPanel.className = 'table-panel';
+
+                        // 左邊預覽：圖片或 PDF
+                        const lowerName = filename.toLowerCase();
+                        if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg') || lowerName.endsWith('.png') || lowerName.endsWith('.webp')) {
+                            const img = document.createElement('img');
+                            img.src = URL.createObjectURL(file);
+                            img.className = 'max-w-full max-h-[400px] object-contain';
+                            previewPanel.appendChild(img);
+                        } else if (lowerName.endsWith('.pdf')) {
+                            const iframe = document.createElement('iframe');
+                            iframe.src = URL.createObjectURL(file);
+                            iframe.className = 'w-full h-[400px]';
+                            previewPanel.appendChild(iframe);
+                        } else {
+                            previewPanel.innerText = '（不支援的預覽格式）';
+                        }
+
+                        // 右邊編輯 JSON 區（預設顯示整個 JSON）
+                        const textarea = document.createElement('textarea');
+                        textarea.value = JSON.stringify(jsonData, null, 2);
+                        textarea.style.width = '100%';
+                        textarea.style.height = '400px';
+                        textarea.style.whiteSpace = 'pre';
+                        jsonEditPanel.appendChild(textarea);
+
+                        // 右邊下載按鈕
+                        const downloadBtn = document.createElement('button');
+                        downloadBtn.textContent = '⬇️ 下載 JSON（含編輯後內容）';
+                        downloadBtn.style.marginTop = '10px';
+                        downloadBtn.onclick = () => {
+                            try {
+                                const updatedJson = JSON.parse(textarea.value);
+                                const blob = new Blob([JSON.stringify(updatedJson, null, 2)], { type: 'application/json' });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = filename.replace(/\.[^.]+$/, '') + '_edited.json';
+                                a.click();
+                                URL.revokeObjectURL(url);
+                            } catch (e) {
+                                alert('❌ JSON 格式錯誤，無法下載。請檢查編輯內容。');
+                            }
+                        };
+                        jsonEditPanel.appendChild(downloadBtn);
+
+                        // 組裝畫面
+                        fileBlock.appendChild(previewPanel);
+                        fileBlock.appendChild(jsonEditPanel);
+                        section.appendChild(fileBlock);
+                        document.getElementById('tableContainer').appendChild(section);
+                        log.textContent += `\n✅ 顯示 ${filename} 非表格 JSON 編輯完成。`;
+
+                    }
                 }
-                // 非表格（excel辨識結果為空的時候） 「沒有辨識出 Excel 表格內容」
-                else {
-
-                    renderJsonUI(jsonData.text, filename);
-
-                }
-
+                reader.readAsArrayBuffer(blob);
 
             } catch (e) {
                 log.textContent += `\n💥 發生錯誤：${e.message}`;
             }
+
         }
     </script>
 </body>
